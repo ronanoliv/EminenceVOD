@@ -19,7 +19,6 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -32,7 +31,6 @@ import org.json.JSONException;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -60,17 +58,42 @@ public final class CatalogActivity extends Activity {
     private SharedPreferences preferences;
     private Future<?> refresh;
     private int loadVersion;
-    private LinearLayout page;
-    private LinearLayout listSection;
-    private Button duloButton;
+    private enum Section {
+        MOVIES("movie", "Movies"), SHOWS("tv", "TV Shows"), SAVED("", "My List");
+
+        final String type;
+        final String label;
+
+        Section(String type, String label) {
+            this.type = type;
+            this.label = label;
+        }
+    }
+
+    private Section section = Section.MOVIES;
+    private int pageNumber = 1;
+    private String query = "";
+    private boolean newest;
+    private ScrollView scroll;
+    private LinearLayout content;
     private Button catalogButton;
-    private FrameLayout hero;
-    private LinearLayout catalogRows;
+    private Button moviesButton;
+    private Button showsButton;
+    private Button savedButton;
+    private Button searchButton;
+    private Button sortButton;
+    private TextView heading;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         preferences = getSharedPreferences("eminence_catalog", MODE_PRIVATE);
         readList();
+        if (state != null) {
+            section = Section.valueOf(state.getString("section", Section.MOVIES.name()));
+            pageNumber = state.getInt("page", 1);
+            query = state.getString("query", "");
+            newest = state.getBoolean("newest");
+        }
         createPage();
         loadCatalog();
     }
@@ -80,90 +103,118 @@ public final class CatalogActivity extends Activity {
         getWindow().setNavigationBarColor(INK);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setBackgroundColor(INK);
-        page = column();
-        page.setPadding(dp(38), dp(18), dp(38), dp(30));
-        scroll.addView(page, new ScrollView.LayoutParams(MATCH, WRAP));
-        setContentView(scroll);
+        LinearLayout page = column();
+        page.setBackgroundColor(INK);
+        page.setPadding(dp(32), dp(12), dp(32), 0);
+        setContentView(page);
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.eminence_icon);
-        header.addView(logo, new LinearLayout.LayoutParams(dp(45), dp(45)));
-        TextView title = text(getString(R.string.app_name), 22, GOLD, true);
-        title.setPadding(dp(12), 0, dp(12), 0);
+        header.addView(logo, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        TextView title = text(getString(R.string.app_name), 20, GOLD, true);
+        title.setSingleLine();
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        title.setPadding(dp(10), 0, dp(10), 0);
         header.addView(title, new LinearLayout.LayoutParams(0, WRAP, 1));
-        duloButton = button("Open Dulo", this::openDulo);
+        addButton(header, button("Open Dulo", this::openDulo));
         catalogButton = button("Connect TMDB", this::showCatalogSettings);
-        addButton(header, duloButton);
         addButton(header, catalogButton);
         addButton(header, button("About", this::showAbout));
-        page.addView(header, new LinearLayout.LayoutParams(MATCH, dp(54)));
+        page.addView(header, new LinearLayout.LayoutParams(MATCH, dp(52)));
 
-        hero = new FrameLayout(this);
-        hero.setBackgroundColor(PANEL);
-        LinearLayout.LayoutParams heroParams = new LinearLayout.LayoutParams(MATCH, dp(244));
-        heroParams.topMargin = dp(12);
-        page.addView(hero, heroParams);
+        LinearLayout navigation = new LinearLayout(this);
+        navigation.setGravity(Gravity.CENTER_VERTICAL);
+        moviesButton = button("Movies", () -> selectSection(Section.MOVIES));
+        showsButton = button("TV Shows", () -> selectSection(Section.SHOWS));
+        savedButton = button("My List", () -> selectSection(Section.SAVED));
+        searchButton = button("Search", this::showSearch);
+        sortButton = button("Sort: Popular", () -> {
+            newest = !newest;
+            pageNumber = 1;
+            loadCatalog();
+        });
+        addButton(navigation, moviesButton);
+        addButton(navigation, showsButton);
+        addButton(navigation, savedButton);
+        navigation.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        addButton(navigation, searchButton);
+        addButton(navigation, sortButton);
+        page.addView(navigation, new LinearLayout.LayoutParams(MATCH, dp(52)));
 
-        listSection = column();
-        page.addView(listSection);
-        showSaved();
-        catalogRows = column();
-        page.addView(catalogRows);
-        duloButton.requestFocus();
+        heading = text("", 18, MUTED, false);
+        heading.setSingleLine();
+        heading.setEllipsize(TextUtils.TruncateAt.END);
+        heading.setPadding(0, dp(5), 0, dp(10));
+        page.addView(heading);
+
+        scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        content = column();
+        content.setPadding(0, 0, 0, dp(24));
+        scroll.addView(content, new ScrollView.LayoutParams(MATCH, WRAP));
+        page.addView(scroll, new LinearLayout.LayoutParams(MATCH, 0, 1));
+        moviesButton.requestFocus();
+    }
+
+    private void selectSection(Section next) {
+        section = next;
+        pageNumber = 1;
+        query = "";
+        loadCatalog();
     }
 
     private void loadCatalog() {
+        loadCatalog(false);
+    }
+
+    private void loadCatalog(boolean focusResults) {
         int version = ++loadVersion;
         if (refresh != null) refresh.cancel(true);
-        catalogRows.removeAllViews();
+        content.removeAllViews();
+        scroll.scrollTo(0, 0);
         String token = preferences.getString(TOKEN, "");
         boolean connected = !token.isEmpty();
         catalogButton.setText(connected ? "Catalog settings" : "Connect TMDB");
+        moviesButton.setSelected(section == Section.MOVIES);
+        showsButton.setSelected(section == Section.SHOWS);
+        savedButton.setSelected(section == Section.SAVED);
+        searchButton.setVisibility(connected && section != Section.SAVED ? View.VISIBLE : View.GONE);
+        sortButton.setVisibility(connected && section != Section.SAVED && query.isEmpty() ? View.VISIBLE : View.GONE);
+        sortButton.setText(newest ? "Sort: Newest" : "Sort: Popular");
+        heading.setText(query.isEmpty() ? section.label : section.label + "  ·  " + query);
+
+        if (section == Section.SAVED) {
+            if (saved.isEmpty()) showMessage("Save a movie or show from its details to find it here.", null, null);
+            else showGrid(new ArrayList<>(saved.values()), 1, focusResults);
+            return;
+        }
         if (!connected) {
-            showHero(null, "Browse Dulo or connect TMDB to fill your home screen with movies and TV shows.",
-                    "Connect TMDB", this::showCatalogSettings);
+            showMessage("Connect TMDB to browse movies and TV shows.", null, null);
             return;
         }
 
-        showHero(null, "Loading movies and TV shows from TMDB…", null, null);
+        showMessage("Loading " + section.label.toLowerCase(java.util.Locale.US) + "…", null, null);
+        String type = section.type;
+        String search = query;
+        boolean sortNewest = newest;
+        int requestedPage = pageNumber;
         refresh = requests.submit(() -> {
-            List<Title> movies = Collections.emptyList();
-            List<Title> shows = Collections.emptyList();
-            boolean partial = false;
             try {
-                try {
-                    movies = TmdbCatalog.trending("movie", token);
-                } catch (TmdbCatalog.InvalidToken e) {
-                    throw e;
-                } catch (IOException | JSONException e) {
-                    partial = true;
-                }
-                if (Thread.currentThread().isInterrupted()) return;
-                try {
-                    shows = TmdbCatalog.trending("tv", token);
-                } catch (TmdbCatalog.InvalidToken e) {
-                    throw e;
-                } catch (IOException | JSONException e) {
-                    partial = true;
-                }
-                List<Title> loadedMovies = movies;
-                List<Title> loadedShows = shows;
-                boolean incomplete = partial;
+                TmdbCatalog.Page result = TmdbCatalog.browse(type, search, sortNewest, requestedPage, token);
                 runOnUiThread(() -> {
-                    if (!isCurrent(version)) return;
-                    showCatalog(loadedMovies, loadedShows, incomplete);
+                    if (isCurrent(version)) showGrid(result.titles, result.totalPages, focusResults);
                 });
             } catch (TmdbCatalog.InvalidToken e) {
                 runOnUiThread(() -> {
-                    if (!isCurrent(version)) return;
-                    showHero(null, "TMDB rejected the saved credentials. Check your API key or read access token.",
+                    if (isCurrent(version)) showMessage("TMDB rejected your credentials.",
                             "Update credentials", this::showCatalogSettings);
+                });
+            } catch (IOException | JSONException e) {
+                runOnUiThread(() -> {
+                    if (isCurrent(version)) showMessage("The TMDB catalog could not be loaded.",
+                            "Retry", () -> loadCatalog(focusResults));
                 });
             }
         });
@@ -173,88 +224,105 @@ public final class CatalogActivity extends Activity {
         return !isDestroyed() && version == loadVersion;
     }
 
-    private void showCatalog(List<Title> movies, List<Title> shows, boolean incomplete) {
-        Title featured = !movies.isEmpty() ? movies.get(0) : !shows.isEmpty() ? shows.get(0) : null;
-        if (featured == null) {
-            showHero(null, incomplete ? "The TMDB catalog could not be loaded." : "TMDB returned no titles.",
-                    "Retry", this::loadCatalog);
-            return;
-        }
-        showHero(featured, featured.overview, "View details", () -> showDetails(featured));
-        if (!movies.isEmpty()) addRow(catalogRows, "Trending movies", movies);
-        if (!shows.isEmpty()) addRow(catalogRows, "Trending TV shows", shows);
-        if (incomplete) addButton(catalogRows, button("Retry unavailable row", this::loadCatalog));
+    private void showMessage(String message, String action, Runnable listener) {
+        content.removeAllViews();
+        TextView status = text(message, 16, MUTED, false);
+        status.setPadding(0, dp(14), 0, dp(8));
+        content.addView(status);
+        if (action != null) addButton(content, button(action, listener));
     }
 
-    private void showHero(Title title, String description, String action, Runnable listener) {
-        hero.removeAllViews();
-        ImageView backdrop = new ImageView(this);
-        backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        FrameLayout.LayoutParams artParams = new FrameLayout.LayoutParams(
-                Math.round(getResources().getDisplayMetrics().widthPixels * .58f), MATCH, Gravity.END);
-        hero.addView(backdrop, artParams);
-        backdrop.setImageResource(R.drawable.eminence_logo);
-        if (title != null) loadImage(backdrop, title.backdrop, true);
-
-        View gradient = new View(this);
-        gradient.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{INK, 0xfa0c0c0e, 0x850c0c0e, 0x150c0c0e}));
-        hero.addView(gradient, new FrameLayout.LayoutParams(MATCH, MATCH));
-        LinearLayout copy = column();
-        copy.setGravity(Gravity.CENTER_VERTICAL);
-        copy.setPadding(dp(20), dp(10), dp(12), dp(10));
-        FrameLayout.LayoutParams copyParams = new FrameLayout.LayoutParams(
-                Math.round(getResources().getDisplayMetrics().widthPixels * .51f), MATCH, Gravity.START);
-        hero.addView(copy, copyParams);
-        if (title != null) copy.addView(text(title.label(), 15, GOLD, true));
-        TextView heading = text(title == null ? getString(R.string.app_name) : title.name, 34, Color.WHITE, true);
-        heading.setMaxLines(2);
-        heading.setEllipsize(TextUtils.TruncateAt.END);
-        copy.addView(heading);
-        if (!description.isEmpty()) {
-            TextView synopsis = text(description, 16, MUTED, false);
-            synopsis.setMaxLines(3);
-            synopsis.setEllipsize(TextUtils.TruncateAt.END);
-            synopsis.setPadding(0, dp(4), 0, dp(5));
-            copy.addView(synopsis);
+    private void showGrid(List<Title> titles, int totalPages, boolean focusResults) {
+        content.removeAllViews();
+        int availableWidth = getResources().getDisplayMetrics().widthPixels - dp(64);
+        int columns = Math.max(1, Math.min(9, availableWidth / dp(116)));
+        LinearLayout row = null;
+        View firstCard = null;
+        for (int i = 0; i < titles.size(); i++) {
+            if (i % columns == 0) {
+                row = new LinearLayout(this);
+                content.addView(row, new LinearLayout.LayoutParams(MATCH, WRAP));
+            }
+            View card = createCard(titles.get(i));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(108), WRAP);
+            params.rightMargin = dp(8);
+            params.bottomMargin = dp(8);
+            row.addView(card, params);
+            if (i == 0) firstCard = card;
         }
-        if (action != null) addButton(copy, button(action, listener));
+
+        if (titles.isEmpty()) {
+            showMessage(query.isEmpty() ? "No titles on this page." : "No matching titles on this page.", null, null);
+        }
+        if (totalPages > 1 || pageNumber > 1) {
+            LinearLayout pagination = new LinearLayout(this);
+            pagination.setGravity(Gravity.CENTER_VERTICAL);
+            Button previous = button("Previous page", () -> {
+                pageNumber--;
+                loadCatalog(true);
+            });
+            previous.setEnabled(pageNumber > 1);
+            Button next = button("Next page", () -> {
+                pageNumber++;
+                loadCatalog(true);
+            });
+            next.setEnabled(pageNumber < totalPages);
+            addButton(pagination, previous);
+            addButton(pagination, next);
+            TextView pageLabel = text("Page " + pageNumber + " of " + Math.max(totalPages, pageNumber), 15, MUTED, false);
+            pageLabel.setPadding(dp(5), 0, 0, 0);
+            pagination.addView(pageLabel);
+            content.addView(pagination);
+            if (firstCard == null) firstCard = next.isEnabled() ? next : previous;
+        }
+        if (focusResults && firstCard != null) firstCard.requestFocus();
     }
 
-    private void addRow(LinearLayout section, String heading, List<Title> titles) {
-        TextView label = text(heading, 23, Color.WHITE, true);
-        label.setPadding(0, dp(20), 0, dp(8));
-        section.addView(label);
-        HorizontalScrollView rail = new HorizontalScrollView(this);
-        rail.setHorizontalScrollBarEnabled(false);
-        rail.setClipToPadding(false);
-        LinearLayout cards = new LinearLayout(this);
-        for (Title title : titles) {
-            LinearLayout card = column();
-            card.setFocusable(true);
-            card.setClickable(true);
-            card.setPadding(dp(3), dp(3), dp(3), dp(3));
-            card.setBackground(focusBackground(PANEL, 8));
-            card.setContentDescription(title.name + ", " + title.label());
-            card.setOnClickListener(view -> showDetails(title));
+    private View createCard(Title title) {
+        LinearLayout card = column();
+        card.setFocusable(true);
+        card.setClickable(true);
+        card.setPadding(dp(3), dp(3), dp(3), dp(3));
+        card.setBackground(focusBackground(PANEL, 8));
+        card.setContentDescription(title.name + ", " + title.label());
+        card.setOnClickListener(view -> showDetails(title));
 
-            ImageView poster = new ImageView(this);
-            poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            poster.setImageResource(R.drawable.eminence_logo);
-            card.addView(poster, new LinearLayout.LayoutParams(MATCH, dp(151)));
-            loadImage(poster, title.poster, false);
-            TextView caption = text(title.name, 14, Color.WHITE, true);
-            caption.setPadding(dp(5), dp(6), dp(4), dp(3));
-            caption.setMaxLines(2);
-            caption.setEllipsize(TextUtils.TruncateAt.END);
-            card.addView(caption, new LinearLayout.LayoutParams(MATCH, dp(47)));
+        ImageView poster = new ImageView(this);
+        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        poster.setImageResource(R.drawable.eminence_logo);
+        card.addView(poster, new LinearLayout.LayoutParams(MATCH, dp(151)));
+        loadImage(poster, title.poster);
+        TextView caption = text(title.name, 14, Color.WHITE, true);
+        caption.setPadding(dp(5), dp(6), dp(4), dp(3));
+        caption.setMaxLines(2);
+        caption.setEllipsize(TextUtils.TruncateAt.END);
+        card.addView(caption, new LinearLayout.LayoutParams(MATCH, dp(47)));
+        return card;
+    }
 
-            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(108), WRAP);
-            cardParams.rightMargin = dp(11);
-            cards.addView(card, cardParams);
-        }
-        rail.addView(cards, new HorizontalScrollView.LayoutParams(WRAP, WRAP));
-        section.addView(rail, new LinearLayout.LayoutParams(MATCH, WRAP));
+    private void showSearch() {
+        EditText field = new EditText(this);
+        field.setSingleLine();
+        field.setInputType(InputType.TYPE_CLASS_TEXT);
+        field.setHint("Title");
+        field.setText(query);
+        field.setSelection(field.length());
+        FrameLayout holder = new FrameLayout(this);
+        holder.setPadding(dp(24), dp(10), dp(24), 0);
+        holder.addView(field, new FrameLayout.LayoutParams(MATCH, WRAP));
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                .setTitle("Search " + section.label)
+                .setView(holder)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Search", (view, which) -> setQuery(field.getText().toString().trim()));
+        if (!query.isEmpty()) dialog.setNeutralButton("Clear search", (view, which) -> setQuery(""));
+        dialog.show();
+    }
+
+    private void setQuery(String value) {
+        query = value;
+        pageNumber = 1;
+        loadCatalog(true);
     }
 
     private void showDetails(Title title) {
@@ -268,7 +336,7 @@ public final class CatalogActivity extends Activity {
                     if (listed) saved.remove(title.key());
                     else saved.put(title.key(), title);
                     writeList();
-                    showSaved();
+                    if (section == Section.SAVED) loadCatalog(true);
                 })
                 .setNegativeButton("Close", null)
                 .show();
@@ -330,11 +398,6 @@ public final class CatalogActivity extends Activity {
         startActivity(new Intent(this, MainActivity.class));
     }
 
-    private void showSaved() {
-        listSection.removeAllViews();
-        if (!saved.isEmpty()) addRow(listSection, "My List", new ArrayList<>(saved.values()));
-    }
-
     private void readList() {
         try {
             JSONArray entries = new JSONArray(preferences.getString(WATCHLIST, "[]"));
@@ -362,8 +425,8 @@ public final class CatalogActivity extends Activity {
         }
     }
 
-    private void loadImage(ImageView view, String path, boolean backdrop) {
-        String url = TmdbCatalog.imageUrl(path, backdrop);
+    private void loadImage(ImageView view, String path) {
+        String url = TmdbCatalog.imageUrl(path);
         if (url.isEmpty()) return;
         Bitmap cached = artwork.get(url);
         if (cached != null) {
@@ -389,7 +452,9 @@ public final class CatalogActivity extends Activity {
         button.setAllCaps(false);
         button.setText(label);
         button.setTextSize(15);
-        button.setTextColor(Color.WHITE);
+        button.setTextColor(new android.content.res.ColorStateList(
+                new int[][]{{-android.R.attr.state_enabled}, {}},
+                new int[]{0xff777579, Color.WHITE}));
         button.setPadding(dp(15), 0, dp(15), 0);
         button.setBackground(focusBackground(PANEL, 7));
         button.setOnClickListener(view -> action.run());
@@ -406,6 +471,7 @@ public final class CatalogActivity extends Activity {
     private StateListDrawable focusBackground(int color, int radius) {
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_focused}, shape(0xff47351d, radius, GOLD));
+        states.addState(new int[]{android.R.attr.state_selected}, shape(0xff392b1a, radius, 0xff806232));
         states.addState(new int[]{}, shape(color, radius, Color.TRANSPARENT));
         return states;
     }
@@ -435,6 +501,14 @@ public final class CatalogActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putString("section", section.name());
+        state.putInt("page", pageNumber);
+        state.putString("query", query);
+        state.putBoolean("newest", newest);
+        super.onSaveInstanceState(state);
     }
 
     @Override protected void onDestroy() {
