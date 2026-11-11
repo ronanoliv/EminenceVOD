@@ -2,10 +2,11 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.eminence.vod'
     compileSdk 35
+    buildToolsVersion "35.0.0"
     defaultConfig {
         applicationId 'com.eminence.vod'
         minSdk 23
-        targetSdk 28
+        targetSdk 34
         versionCode 1
         versionName '1.0.0'
     }

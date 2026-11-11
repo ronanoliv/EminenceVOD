@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Eminence VOD</string>
+    <string name="home">Home</string>
+    <string name="back">Back</string>
+    <string name="reload">Reload</string>
+    <string name="browser">Browser</string>
+    <string name="no_browser">No TV browser installed</string>
+    <string name="remote_hint">Arrows move the pointer. OK selects. Press Up at the top to open the toolbar.</string>
+    <string name="load_error">Dulo could not be loaded. Use Reload to try again.</string>
+</resources>

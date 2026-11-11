@@ -1,19 +1,19 @@
 # Eminence VOD for Android TV
 
-A personal Android TV / Google TV browser launcher for https://dulo.mov/.
+Eminence VOD opens [Dulo.mov](https://dulo.mov/) in an Android WebView and uses the site's player.
 
-- Full-screen branded TV wrapper
-- D-pad pointer mode (use arrows to move, OK to select)
-- Menu button toggles the toolbar
-- Home, Back, Reload, and external browser
-- Website playback only; no scraping or stream extraction
+## Install and use
 
-## APK builds
+Download the APK from [GitHub Releases](https://github.com/ronanoliv/EminenceVOD/releases).
+On your TV, use Downloader or transfer the APK over USB, then open the file to install it.
 
-GitHub Actions → **Build Eminence VOD APK** → Run workflow, or push to main. Download the **EminenceVOD-debug-apk** artifact after a successful run. Extract the ZIP to get app-debug.apk.
+- Move the pointer with the remote's arrows and select with OK.
+- Hold Up or Down at the edge of the screen to scroll. Channel Up and Down also scroll where available.
+- Press Up again at the top edge or press Menu to open the toolbar. Press Down or Back to return to the page.
+- Press Back to leave fullscreen video or return to the previous page.
 
-This is an experimental first build. Dulo compatibility and TV playback have not been verified. The original custom logo artwork still needs to be uploaded to app/src/main/res/drawable/eminence_logo.png to replace the placeholder. 
+## Build
 
-## Build locally
-
-Install Android Studio + SDK 35 and run `gradle :app:assembleDebug`.
+Use Java 17, Gradle 8.9, Android SDK 35 and Build Tools 35.0.0.
+Run `gradle :app:lintDebug :app:assembleDebug :app:assembleRelease`.
+The **Build Eminence VOD APK** GitHub Actions workflow verifies the debug APK and uploads both build variants. Sign the unsigned release APK with the release signing key before distribution.
