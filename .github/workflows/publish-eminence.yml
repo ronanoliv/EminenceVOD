@@ -1,0 +1,23 @@
+name: Publish Eminence VOD 1.1.1
+on:
+  push:
+    branches: [publish-eminence-v1.1.1]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and publish the signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=release/EminenceVOD.apk
+          echo "bab0f1f5931fae3362c43381027a6b2010d55ac4a3a1d224c72026a81c615a82  $apk" | sha256sum -c -
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+          gh release create v1.1.1 "$apk" \
+            --target "aede5cbbcc91af4c9bb96892911ba032d3bf376a" \
+            --title "Eminence VOD 1.1.1" \
+            --notes "Automatically advances to the next Dulo TV episode at the end of playback when Dulo offers one. Install this signed update over your existing Eminence VOD installation."
