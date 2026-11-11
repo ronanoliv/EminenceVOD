@@ -17,6 +17,7 @@ On your TV, use Downloader or transfer the APK over USB, then open the file to i
 - Hold Up or Down at the edge of the screen to scroll. Channel Up and Down also scroll where available.
 - Press Up again at the top edge or press Menu to open the toolbar. Press Down or Back to return to the page.
 - Press Back to leave fullscreen video or return to the previous page.
+- When a Dulo TV episode ends, the app selects the next episode if Dulo offers one.
 
 ## Build
 

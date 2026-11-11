@@ -24,14 +24,24 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+
 public final class MainActivity extends Activity {
     private static final String HOME = "https://dulo.mov/";
+    private static final String AUTOPLAY_STATE =
+            "if (location.origin === 'https://dulo.mov' && window.__eminenceEpisodeAutoplay) "
+                    + "window.__eminenceEpisodeAutoplay.active = ";
     private static final int GOLD = 0xffe6b95d;
     private static final int FILL = FrameLayout.LayoutParams.MATCH_PARENT;
 
     private FrameLayout root;
     private LinearLayout toolbar;
     private WebView web;
+    private String episodeAutoplayScript;
+    private boolean resumed;
     private TextView pointer;
     private ImageView splash;
     private final Runnable dismissSplash = this::removeSplash;
@@ -79,6 +89,7 @@ public final class MainActivity extends Activity {
     }
 
     private void createWebView() {
+        episodeAutoplayScript = loadEpisodeAutoplayScript();
         web = new WebView(this);
         web.setBackgroundColor(Color.BLACK);
         web.getSettings().setJavaScriptEnabled(true);
@@ -98,6 +109,21 @@ public final class MainActivity extends Activity {
             @SuppressWarnings("deprecation")
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return blockNonHttps(Uri.parse(url));
+            }
+
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                Uri address = url == null ? Uri.EMPTY : Uri.parse(url);
+                String path = address.getPath();
+                boolean episode = isDulo(address) && path != null && path.matches("/watch/tv/[0-9]+/?");
+                view.getSettings().setMediaPlaybackRequiresUserGesture(!episode);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (episodeAutoplayScript != null && url != null && isDulo(Uri.parse(url))) {
+                    view.evaluateJavascript(episodeAutoplayScript + "\n" + AUTOPLAY_STATE + resumed + ";", null);
+                }
             }
 
             @Override
@@ -136,6 +162,24 @@ public final class MainActivity extends Activity {
         });
         root.addView(web, new FrameLayout.LayoutParams(FILL, FILL));
         web.requestFocus();
+    }
+
+    private String loadEpisodeAutoplayScript() {
+        try (InputStream input = getAssets().open("dulo-episode-autoplay.js")) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            android.util.Log.w("EminenceVOD", "Unable to load episode autoplay", error);
+            return null;
+        }
+    }
+
+    private boolean isDulo(Uri url) {
+        return "https".equals(url.getScheme()) && "dulo.mov".equals(url.getHost())
+                && (url.getPort() == -1 || url.getPort() == 443);
     }
 
     private boolean blockNonHttps(Uri url) {
@@ -352,6 +396,8 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        resumed = false;
+        web.evaluateJavascript(AUTOPLAY_STATE + "false;", null);
         web.onPause();
         super.onPause();
     }
@@ -359,7 +405,9 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         web.onResume();
+        web.evaluateJavascript(AUTOPLAY_STATE + "true;", null);
     }
 
     @Override
