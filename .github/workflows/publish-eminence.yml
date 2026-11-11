@@ -1,0 +1,23 @@
+name: Publish Eminence VOD 1.2.0
+on:
+  push:
+    branches: [publish-eminence-v1.2.0]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and publish the signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=release/EminenceVOD.apk
+          echo "f951d7707337701873539e13d042cd05e99547471cc621fed65aa1612dba90a8  $apk" | sha256sum -c -
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+          gh release create v1.2.0 "$apk" \
+            --target "1cf745505cf242ce9851856aa7d5b2590ed77d0c" \
+            --title "Eminence VOD 1.2.0" \
+            --notes "Replaces the featured banner with remote-friendly Movies and TV Shows grids. Browse TMDB pages, search by title, sort by newest release, and save titles to My List. Open Dulo displays Dulo's live website. Install over your existing app."
