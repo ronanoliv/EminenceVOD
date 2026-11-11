@@ -1,6 +1,7 @@
 package com.eminence.vod;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.res.ColorStateList;
@@ -14,7 +15,9 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -30,7 +33,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 public final class MainActivity extends Activity {
-    private static final String HOME = "https://dulo.mov/";
+    private static final long SOURCE_TIMEOUT_MS = 15000;
     private static final String AUTOPLAY_STATE =
             "if (location.origin === 'https://dulo.mov' && window.__eminenceEpisodeAutoplay) "
                     + "window.__eminenceEpisodeAutoplay.active = ";
@@ -42,6 +45,10 @@ public final class MainActivity extends Activity {
     private WebView web;
     private String episodeAutoplayScript;
     private boolean resumed;
+    private PlaybackSource source;
+    private boolean autoFallback;
+    private boolean initialLoadPending;
+    private final Runnable sourceTimeout = this::handleInitialLoadFailure;
     private TextView pointer;
     private ImageView splash;
     private final Runnable dismissSplash = this::removeSplash;
@@ -54,6 +61,8 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        source = PlaybackSource.selectedBy(getIntent());
+        autoFallback = PlaybackSource.autoFallback(getIntent());
         hideSystemBars();
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -70,7 +79,7 @@ public final class MainActivity extends Activity {
             positionPointer();
         });
         if (state == null || web.restoreState(state) == null) {
-            web.loadUrl(HOME);
+            loadSourceHome();
         }
         Toast.makeText(this, R.string.remote_hint, Toast.LENGTH_LONG).show();
     }
@@ -89,7 +98,7 @@ public final class MainActivity extends Activity {
     }
 
     private void createWebView() {
-        episodeAutoplayScript = loadEpisodeAutoplayScript();
+        if (source == PlaybackSource.DULO) episodeAutoplayScript = loadEpisodeAutoplayScript();
         web = new WebView(this);
         web.setBackgroundColor(Color.BLACK);
         web.getSettings().setJavaScriptEnabled(true);
@@ -98,11 +107,15 @@ public final class MainActivity extends Activity {
         web.getSettings().setLoadWithOverviewMode(true);
         web.getSettings().setAllowFileAccess(false);
         web.getSettings().setAllowContentAccess(false);
+        web.getSettings().setJavaScriptCanOpenWindowsAutomatically(false);
+        // Enable separate-window requests so the default WebChromeClient rejects them.
+        web.getSettings().setSupportMultipleWindows(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return blockNonHttps(request.getUrl());
+                Uri address = request.getUrl();
+                return request.isForMainFrame() ? !source.allows(address) : blockNonHttps(address);
             }
 
             @Override
@@ -112,30 +125,44 @@ public final class MainActivity extends Activity {
             }
 
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+                // Also guard top-level navigations on older WebViews and form submissions.
+                if (url != null && !source.allows(Uri.parse(url))) view.stopLoading();
+            }
+
+            @Override
             public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
                 Uri address = url == null ? Uri.EMPTY : Uri.parse(url);
                 String path = address.getPath();
-                boolean episode = isDulo(address) && path != null && path.matches("/watch/tv/[0-9]+/?");
+                boolean episode = source == PlaybackSource.DULO && source.allows(address)
+                        && path != null && path.matches("/watch/tv/[0-9]+/?");
                 view.getSettings().setMediaPlaybackRequiresUserGesture(!episode);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                if (episodeAutoplayScript != null && url != null && isDulo(Uri.parse(url))) {
+                if (episodeAutoplayScript != null && url != null && "dulo.mov".equals(Uri.parse(url).getHost())) {
                     view.evaluateJavascript(episodeAutoplayScript + "\n" + AUTOPLAY_STATE + resumed + ";", null);
                 }
             }
 
             @Override
             public void onPageCommitVisible(WebView view, String url) {
+                if (url != null && source.allows(Uri.parse(url))) finishInitialLoad();
                 removeSplash();
             }
 
             @Override
-            @SuppressWarnings("deprecation")
-            public void onReceivedError(WebView view, int code, String description, String url) {
-                removeSplash();
-                Toast.makeText(MainActivity.this, R.string.load_error, Toast.LENGTH_LONG).show();
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request.isForMainFrame()) handlePageError(request.getUrl().toString());
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                            WebResourceResponse response) {
+                if (request.isForMainFrame() && response.getStatusCode() >= 400) {
+                    handlePageError(request.getUrl().toString());
+                }
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -177,9 +204,62 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private boolean isDulo(Uri url) {
-        return "https".equals(url.getScheme()) && "dulo.mov".equals(url.getHost())
-                && (url.getPort() == -1 || url.getPort() == 443);
+    private void loadSourceHome() {
+        initialLoadPending = true;
+        web.loadUrl(source.home);
+        startSourceTimeout();
+    }
+
+    private void startSourceTimeout() {
+        web.removeCallbacks(sourceTimeout);
+        if (resumed && initialLoadPending) web.postDelayed(sourceTimeout, SOURCE_TIMEOUT_MS);
+    }
+
+    private void finishInitialLoad() {
+        initialLoadPending = false;
+        web.removeCallbacks(sourceTimeout);
+    }
+
+    private void handlePageError(String url) {
+        if (url == null || !source.allows(Uri.parse(url))) return;
+        if (initialLoadPending) {
+            if (resumed) handleInitialLoadFailure();
+            return;
+        }
+        removeSplash();
+        Toast.makeText(this, getString(R.string.load_error, source.label), Toast.LENGTH_LONG).show();
+    }
+
+    private void handleInitialLoadFailure() {
+        if (!initialLoadPending || !resumed || isFinishing()) return;
+        finishInitialLoad();
+        web.stopLoading();
+        removeSplash();
+        PlaybackSource next = autoFallback ? source.next() : null;
+        if (next != null) {
+            Toast.makeText(this, getString(R.string.try_next_source, source.label, next.label),
+                    Toast.LENGTH_SHORT).show();
+            next.open(this, true);
+            finish();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setMessage(getString(R.string.load_error, source.label))
+                .setPositiveButton(R.string.playback_sources, (dialog, which) -> chooseSource())
+                .setNeutralButton(R.string.reload, (dialog, which) -> loadSourceHome())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void chooseSource() {
+        PlaybackSource.choose(this, selected -> {
+            if (selected == source) {
+                loadSourceHome();
+            } else {
+                selected.open(this, false);
+                finish();
+            }
+        });
     }
 
     private boolean blockNonHttps(Uri url) {
@@ -195,17 +275,18 @@ public final class MainActivity extends Activity {
         logo.setImageResource(R.drawable.eminence_icon);
         toolbar.addView(logo, new LinearLayout.LayoutParams(dp(42), dp(42)));
         TextView title = new TextView(this);
-        title.setText(R.string.app_name);
+        title.setText(source.label);
         title.setTextColor(GOLD);
         title.setTextSize(18);
         title.setPadding(dp(10), 0, dp(12), 0);
         toolbar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
 
-        homeButton = addButton(R.string.home, () -> web.loadUrl(HOME));
+        homeButton = addButton(R.string.home, this::loadSourceHome);
         addButton(R.string.back, () -> {
             if (web.canGoBack()) web.goBack();
         });
         addButton(R.string.reload, web::reload);
+        addButton(R.string.sources_short, this::chooseSource);
         addButton(R.string.browser, this::openExternal);
         toolbar.setVisibility(View.GONE);
         root.addView(toolbar, new FrameLayout.LayoutParams(FILL, dp(60), Gravity.TOP));
@@ -274,7 +355,7 @@ public final class MainActivity extends Activity {
     private void openExternal() {
         String url = web.getUrl();
         try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url == null ? HOME : url)));
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url == null ? source.home : url)));
         } catch (ActivityNotFoundException e) {
             Toast.makeText(this, R.string.no_browser, Toast.LENGTH_SHORT).show();
         }
@@ -397,6 +478,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         resumed = false;
+        web.removeCallbacks(sourceTimeout);
         web.evaluateJavascript(AUTOPLAY_STATE + "false;", null);
         web.onPause();
         super.onPause();
@@ -406,12 +488,14 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        startSourceTimeout();
         web.onResume();
         web.evaluateJavascript(AUTOPLAY_STATE + "true;", null);
     }
 
     @Override
     protected void onDestroy() {
+        finishInitialLoad();
         exitVideo();
         removeSplash();
         web.stopLoading();

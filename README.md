@@ -1,6 +1,6 @@
 # Eminence VOD for Android TV
 
-Eminence VOD is an Android TV catalog browser. It provides a browsable and searchable movie and TV catalog from [TMDB](https://www.themoviedb.org/) and opens [Dulo.mov](https://dulo.mov/) in a separate in-app browser screen.
+Eminence VOD is an Android TV catalog browser. It provides a browsable and searchable movie and TV catalog from [TMDB](https://www.themoviedb.org/) and opens playback sources in an in-app browser.
 
 ## Install and use
 
@@ -9,9 +9,10 @@ On your TV, use Downloader or transfer the APK over USB, then open the file to i
 
 1. Select **Connect TMDB** on the home screen. Sign in to [TMDB's API settings](https://www.themoviedb.org/settings/api) and enter your **API key** or **API Read Access Token** in the TV app. The app stores the credential on the TV.
 2. Use the remote arrows and **OK** to browse **Movies** or **TV Shows**, search by title, sort by newest release, and save titles to **My List**. The app loads fresh TMDB results when you open a section or page.
-3. Select **Open Dulo** to browse and play on Dulo. Search for the title on the website. TMDB metadata gives no confirmation that Dulo carries a title.
+3. Select **Watch** to open Sweetfox. If the homepage fails to load, the app tries Flixer, Dulo, and Movy in order. **Sources** lets you select a specific website from the catalog or browser toolbar.
+4. Search for the title on the chosen website. Each site handles its own player and video server selection. The in-app browser blocks new windows and keeps top-level navigation on the selected source.
 
-### Dulo controls
+### Playback controls
 
 - Move the pointer with the remote's arrows and select with OK.
 - Hold Up or Down at the edge of the screen to scroll. Channel Up and Down also scroll where available.

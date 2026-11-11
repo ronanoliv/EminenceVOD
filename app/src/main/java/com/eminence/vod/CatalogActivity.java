@@ -2,7 +2,6 @@ package com.eminence.vod;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -118,7 +117,8 @@ public final class CatalogActivity extends Activity {
         title.setEllipsize(TextUtils.TruncateAt.END);
         title.setPadding(dp(10), 0, dp(10), 0);
         header.addView(title, new LinearLayout.LayoutParams(0, WRAP, 1));
-        addButton(header, button("Open Dulo", this::openDulo));
+        addButton(header, button(getString(R.string.watch), () -> PlaybackSource.SWEETFOX.open(this, true)));
+        addButton(header, button(getString(R.string.sources_short), this::choosePlaybackSource));
         catalogButton = button("Connect TMDB", this::showCatalogSettings);
         addButton(header, catalogButton);
         addButton(header, button("About", this::showAbout));
@@ -330,8 +330,8 @@ public final class CatalogActivity extends Activity {
         String summary = title.label() + (title.overview.isEmpty() ? "" : "\n\n" + title.overview);
         new AlertDialog.Builder(this)
                 .setTitle(title.name)
-                .setMessage(summary + "\n\nOpen Dulo to search for this title.")
-                .setPositiveButton("Open Dulo", (dialog, which) -> openDulo())
+                .setMessage(summary + "\n\n" + getString(R.string.find_on_source))
+                .setPositiveButton(R.string.playback_sources, (dialog, which) -> choosePlaybackSource())
                 .setNeutralButton(listed ? "Remove from My List" : "Add to My List", (dialog, which) -> {
                     if (listed) saved.remove(title.key());
                     else saved.put(title.key(), title);
@@ -394,8 +394,8 @@ public final class CatalogActivity extends Activity {
                 .setPositiveButton("Close", null).show();
     }
 
-    private void openDulo() {
-        startActivity(new Intent(this, MainActivity.class));
+    private void choosePlaybackSource() {
+        PlaybackSource.choose(this, source -> source.open(this, false));
     }
 
     private void readList() {

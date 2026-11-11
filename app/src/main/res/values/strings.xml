@@ -6,5 +6,10 @@
     <string name="browser">Browser</string>
     <string name="no_browser">No TV browser installed</string>
     <string name="remote_hint">Arrows move the pointer. OK selects. Press Up at the top to open the toolbar.</string>
-    <string name="load_error">Dulo could not be loaded. Use Reload to try again.</string>
+    <string name="watch">Watch</string>
+    <string name="sources_short">Sources</string>
+    <string name="playback_sources">Playback Sources</string>
+    <string name="find_on_source">Choose a source and search for this title there.</string>
+    <string name="load_error">%1$s could not be loaded. Reload or choose another source.</string>
+    <string name="try_next_source">%1$s could not load. Trying %2$s…</string>
 </resources>
