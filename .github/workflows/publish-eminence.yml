@@ -1,0 +1,23 @@
+name: Publish Eminence VOD 1.3.0
+on:
+  push:
+    branches: [publish-eminence-v1.3.0]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and publish the signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=release/EminenceVOD.apk
+          echo "f5997f4ab013b3caad04e811c868e69defe8d824109775af4cd6e6323a64ac88  $apk" | sha256sum -c -
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+          gh release create v1.3.0 "$apk" \
+            --target "d1a9997ce7deae6f425c732afc88d4775b04321e" \
+            --title "Eminence VOD 1.3.0" \
+            --notes "Watch opens Sweetfox first, followed by Flixer, Dulo, and Movy when the homepage fails to load. Use Sources to switch manually. The in-app browser blocks new windows and off-site page redirects. Install over your existing app."
