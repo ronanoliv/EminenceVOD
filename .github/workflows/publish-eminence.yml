@@ -1,23 +1,36 @@
-name: Publish Eminence VOD 1.0.0
+name: Test Eminence VOD on Android TV
 on:
   push:
     branches: [publish-eminence-v1.0.0]
 permissions:
-  contents: write
+  contents: read
 jobs:
-  publish:
+  tv-smoke:
     runs-on: ubuntu-24.04
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - name: Verify and publish the signed release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Install and launch the release APK on Android TV
+        shell: bash
         run: |
           set -euo pipefail
-          apk=release/EminenceVOD.apk
-          echo "6dc13194cf90b286fd5ab8b83fb453c61ca6773335b4cffaf53930d4ba32008d  $apk" | sha256sum -c -
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
-          gh release create v1.0.0 "$apk" \
-            --target "aefcbbbc4f2c4d424f2179f6f4d2961a1137fd58" \
-            --title "Eminence VOD 1.0.0" \
-            --notes "First Android TV and Google TV release. Includes the original gold Eminence artwork, remote pointer controls and an in-app WebView that opens Dulo.mov. Download the attached APK to sideload. Use the remote arrows to move the pointer and OK to select. Press Up at the top edge to open the toolbar."
+          sudo chgrp "$(id -gn)" /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          sdkmanager --install 'system-images;android-34;android-tv;x86'
+          echo no | avdmanager create avd --name ReleaseSmoke --package 'system-images;android-34;android-tv;x86' --device 'tv_1080p'
+          "$ANDROID_HOME/emulator/emulator" -avd ReleaseSmoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -cores 2 > /tmp/eminence-emulator.log 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true; tail -40 /tmp/eminence-emulator.log' EXIT
+          timeout 150 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 4; done'
+          adb shell getprop ro.build.characteristics
+          adb install release/EminenceVOD.apk
+          adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER -p com.eminence.vod | grep com.eminence.vod
+          adb shell am start -W -n com.eminence.vod/.MainActivity | tee /tmp/eminence-start.txt
+          grep -q 'Status: ok' /tmp/eminence-start.txt
+          for i in $(seq 1 14); do adb shell input keyevent KEYCODE_DPAD_UP; done
+          adb shell uiautomator dump /sdcard/eminence-window.xml
+          adb shell cat /sdcard/eminence-window.xml | grep -o 'text="Reload"'
+          adb shell input keyevent KEYCODE_BACK
+          adb shell uiautomator dump /sdcard/eminence-window.xml
+          adb shell cat /sdcard/eminence-window.xml | grep -o 'class="android.webkit.WebView"'
+          adb shell pidof com.eminence.vod
