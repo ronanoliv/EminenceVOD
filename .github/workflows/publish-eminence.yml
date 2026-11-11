@@ -1,0 +1,64 @@
+name: Publish and test Eminence VOD 1.1.0
+on:
+  push:
+    branches: [publish-eminence-v1.1.0]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and publish the signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=release/EminenceVOD.apk
+          echo "54b14051ac99c8b8afd9ae0da2dad8718a3433b651c329e801d1b70619e51c7a  $apk" | sha256sum -c -
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+          gh release create v1.1.0 "$apk" \
+            --target "8c5cfb34d04acde29930855ed81516344cfdbd54" \
+            --title "Eminence VOD 1.1.0" \
+            --notes "Adds a native Android TV home screen with a featured title, trending movie and TV poster rows, title details, and My List. Select Connect TMDB and enter an API key or API Read Access Token from https://www.themoviedb.org/settings/api. Select Open Dulo to browse and play on the Dulo website inside the app."
+  tv-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start an isolated Android TV emulator and test the signed update
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chgrp "$(id -gn)" /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          tools_bin=$(dirname "$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager | sort -V | tail -1)")
+          export PATH="$tools_bin:$ANDROID_HOME/platform-tools:$PATH"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/eminence-tv-avds"
+          mkdir -p "$ANDROID_AVD_HOME"
+          sdkmanager --install 'system-images;android-34;android-tv;x86'
+          avdmanager create avd --path "$ANDROID_AVD_HOME/EminenceCatalog.avd" --name EminenceCatalog --package 'system-images;android-34;android-tv;x86' --device 'tv_1080p' <<< no
+          test -f "$ANDROID_AVD_HOME/EminenceCatalog.ini"
+          adb start-server
+          "$ANDROID_HOME/emulator/emulator" -avd EminenceCatalog -no-window -no-audio -no-boot-anim -no-snapshot -skip-adb-auth -gpu swiftshader_indirect -cores 2 > "$RUNNER_TEMP/eminence-emulator.log" 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true; tail -40 "$RUNNER_TEMP/eminence-emulator.log"' EXIT
+          timeout 125 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 3; done'
+          curl -fLsS --max-time 20 https://github.com/ronanoliv/EminenceVOD/releases/download/v1.0.0/EminenceVOD.apk -o "$RUNNER_TEMP/previous.apk"
+          adb install "$RUNNER_TEMP/previous.apk"
+          adb install -r release/EminenceVOD.apk
+          adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER -p com.eminence.vod | grep com.eminence.vod.CatalogActivity
+          adb shell am start -W -n com.eminence.vod/.CatalogActivity | tee "$RUNNER_TEMP/start.txt"
+          grep -q 'Status: ok' "$RUNNER_TEMP/start.txt"
+          adb shell uiautomator dump /sdcard/eminence-window.xml
+          adb shell cat /sdcard/eminence-window.xml > "$RUNNER_TEMP/window.xml"
+          grep -o 'text="Connect TMDB"' "$RUNNER_TEMP/window.xml"
+          grep -o 'text="Open Dulo"' "$RUNNER_TEMP/window.xml"
+          adb shell input keyevent KEYCODE_DPAD_CENTER
+          for i in $(seq 1 12); do
+            if adb shell dumpsys activity activities | grep 'mResumedActivity' | grep 'com.eminence.vod/.MainActivity'; then exit 0; fi
+            sleep 1
+          done
+          adb shell dumpsys activity activities | grep 'com.eminence.vod/.MainActivity'
