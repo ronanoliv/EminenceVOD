@@ -4,7 +4,8 @@
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <application android:label="@string/app_name" android:icon="@drawable/eminence_icon" android:banner="@drawable/eminence_banner" android:allowBackup="false" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="false">
-        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape">
+        <activity android:name=".MainActivity" android:exported="false" android:screenOrientation="landscape"/>
+        <activity android:name=".CatalogActivity" android:exported="true" android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
