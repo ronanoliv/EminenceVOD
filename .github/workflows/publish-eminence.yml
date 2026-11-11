@@ -39,18 +39,13 @@ jobs:
           adb shell cat /sdcard/eminence-window.xml > "$RUNNER_TEMP/window.xml"
           grep -o 'text="Connect TMDB"' "$RUNNER_TEMP/window.xml"
           grep -o 'text="Open Dulo"' "$RUNNER_TEMP/window.xml"
-          adb shell input keyevent KEYCODE_DPAD_LEFT
-          adb shell input keyevent KEYCODE_DPAD_LEFT
-          adb shell uiautomator dump /sdcard/eminence-focus.xml
-          adb shell cat /sdcard/eminence-focus.xml > "$RUNNER_TEMP/focus.xml"
-          python3 -c 'import sys,xml.etree.ElementTree as ET; print([(n.get("text"), n.get("focused"), n.get("bounds")) for n in ET.parse(sys.argv[1]).iter("node") if n.get("text") == "Open Dulo" or n.get("focused") == "true"])' "$RUNNER_TEMP/focus.xml"
-          adb shell input keyevent KEYCODE_DPAD_CENTER
-          sleep 2
-          adb shell dumpsys activity activities > "$RUNNER_TEMP/activities.txt"
-          if ! grep -q 'com.eminence.vod/.MainActivity' "$RUNNER_TEMP/activities.txt"; then
-            coords=$(python3 -c 'import re,sys,xml.etree.ElementTree as ET; node=next(n for n in ET.parse(sys.argv[1]).iter("node") if n.get("text")=="Open Dulo"); a,b,c,d=map(int,re.findall(r"\d+",node.get("bounds"))); print((a+c)//2,(b+d)//2)' "$RUNNER_TEMP/focus.xml")
-            adb shell input tap $coords
-            sleep 2
+          coords=$(python3 -c 'import re,sys,xml.etree.ElementTree as ET; node=next(n for n in ET.parse(sys.argv[1]).iter("node") if n.get("text")=="Open Dulo"); a,b,c,d=map(int,re.findall(r"\d+",node.get("bounds"))); print((a+c)//2,(b+d)//2)' "$RUNNER_TEMP/window.xml")
+          adb shell input tap $coords
+          for i in $(seq 1 8); do
             adb shell dumpsys activity activities > "$RUNNER_TEMP/activities.txt"
-          fi
-          grep 'com.eminence.vod/.MainActivity' "$RUNNER_TEMP/activities.txt"
+            if grep 'com.eminence.vod/.MainActivity' "$RUNNER_TEMP/activities.txt"; then exit 0; fi
+            sleep 1
+          done
+          adb shell dumpsys activity top | grep -E 'ACTIVITY|mResumed'
+          adb logcat -d -s AndroidRuntime:E
+          exit 1
