@@ -1,0 +1,23 @@
+name: Publish Eminence VOD 1.0.0
+on:
+  push:
+    branches: [publish-eminence-v1.0.0]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and publish the signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=release/EminenceVOD.apk
+          echo "6dc13194cf90b286fd5ab8b83fb453c61ca6773335b4cffaf53930d4ba32008d  $apk" | sha256sum -c -
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+          gh release create v1.0.0 "$apk" \
+            --target "aefcbbbc4f2c4d424f2179f6f4d2961a1137fd58" \
+            --title "Eminence VOD 1.0.0" \
+            --notes "First Android TV and Google TV release. Includes the original gold Eminence artwork, remote pointer controls and an in-app WebView that opens Dulo.mov. Download the attached APK to sideload. Use the remote arrows to move the pointer and OK to select. Press Up at the top edge to open the toolbar."
