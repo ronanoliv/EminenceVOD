@@ -16,8 +16,10 @@ jobs:
           set -euo pipefail
           sudo chgrp "$(id -gn)" /dev/kvm
           sudo chmod g+rw /dev/kvm
+          tools_bin=$(dirname "$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager | sort -V | tail -1)")
+          export PATH="$tools_bin:$ANDROID_HOME/platform-tools:$PATH"
           sdkmanager --install 'system-images;android-34;android-tv;x86'
-          echo no | avdmanager create avd --name ReleaseSmoke --package 'system-images;android-34;android-tv;x86' --device 'tv_1080p'
+          avdmanager create avd --name ReleaseSmoke --package 'system-images;android-34;android-tv;x86' --device 'tv_1080p' <<< no
           "$ANDROID_HOME/emulator/emulator" -avd ReleaseSmoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -cores 2 > /tmp/eminence-emulator.log 2>&1 &
           emulator_pid=$!
           trap 'kill "$emulator_pid" 2>/dev/null || true; tail -40 /tmp/eminence-emulator.log' EXIT
